@@ -17,6 +17,7 @@
 package de.heikoseeberger.reactiveflows
 
 import akka.actor.{ Actor, ExtendedActorSystem, Extension, ExtensionKey }
+import scala.concurrent.duration.{ FiniteDuration, MILLISECONDS }
 
 object Settings extends ExtensionKey[Settings]
 
@@ -26,6 +27,9 @@ class Settings(system: ExtendedActorSystem) extends Extension {
   /** http-service namespace. */
   object httpService {
 
+    /** Timeout for the [[HttpService]] asking itself. */
+    val askSelfTimeout = getDuration("http-service.ask-self-timeout")
+
     /** Interface for the [[HttpService]] to bind to. */
     val interface = reactiveFlows.getString("http-service.interface")
 
@@ -33,7 +37,16 @@ class Settings(system: ExtendedActorSystem) extends Extension {
     val port = reactiveFlows.getInt("http-service.port")
   }
 
+  /** message-event-publisher namespace. */
+  object messageEventPublisher {
+
+    /** Buffer size for the [[MessageEventPublisher]]. */
+    val bufferSize = reactiveFlows.getInt("message-event-publisher.buffer-size")
+  }
+
   private val reactiveFlows = system.settings.config.getConfig("reactive-flows")
+
+  private def getDuration(key: String) = FiniteDuration(reactiveFlows.getDuration(key, MILLISECONDS), MILLISECONDS)
 }
 
 /** Convenient access to configuration settings for actors. */
