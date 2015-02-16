@@ -31,4 +31,20 @@ reactiveFlowsControllers.controller('HomeCtrl', ['$scope', function($scope) {
     $scope.sendMessage = function() {
         alert('TODO: Missing implementation!');
     };
+
+    // SSE for messages
+    var messageSource = new EventSource('/message-events');
+    messageSource.addEventListener(
+        'added',
+        function(event) {
+            $scope.$apply(function() {
+                var messageAdded = JSON.parse(event.data);
+                console.log('Received message added event for flow ' + messageAdded.flowName);
+                if ($scope.currentFlowName == messageAdded.flowName) {
+                    $scope.messages.push(messageAdded.message);
+                }
+            });
+        },
+        false
+    );
 }]);
