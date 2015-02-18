@@ -33,4 +33,14 @@ trait ServerSentEventProtocol {
         val data = PrettyPrinter(jsonWriter[Flow.MessageAdded].write(messageAdded))
         ServerSentEvent(data, "added")
     }
+
+  /** Converts a [[FlowRegistry.FlowEvent]] to a `ServerSentEvent`. */
+  implicit def flowEventToServerSentEvent(event: FlowRegistry.FlowEvent): ServerSentEvent =
+    event match {
+      case FlowRegistry.FlowRegistered(flow) =>
+        val data = PrettyPrinter(jsonWriter[FlowRegistry.Flow].write(flow))
+        ServerSentEvent(data, "added")
+      case FlowRegistry.FlowUnregistered(name) =>
+        ServerSentEvent(name, "removed")
+    }
 }

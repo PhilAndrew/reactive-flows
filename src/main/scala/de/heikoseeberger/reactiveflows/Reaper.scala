@@ -44,7 +44,12 @@ class Reaper extends Actor with ActorLogging with SettingsActor {
 
   /** Factory for the [[HttpService]] actor. */
   protected def createHttpService() = context.actorOf(
-    HttpService.props(settings.httpService.interface, settings.httpService.port, settings.httpService.askSelfTimeout),
+    HttpService.props(
+      settings.httpService.interface,
+      settings.httpService.port,
+      settings.httpService.askSelfTimeout,
+      settings.httpService.flowRegistryTimeout
+    ),
     HttpService.Name
   )
 

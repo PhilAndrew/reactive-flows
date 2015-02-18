@@ -17,33 +17,46 @@
 package de.heikoseeberger.reactiveflows
 
 import akka.actor.{ Actor, ActorLogging, ActorRef, Props }
+import akka.contrib.pattern.DistributedPubSubExtension
 import akka.http.Http
+import akka.http.model.StatusCodes
 import akka.http.server.Directives
 import akka.pattern.ask
+import akka.stream.FlowMaterializer
 import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{ ImplicitFlowMaterializer, Source }
 import akka.util.Timeout
 import de.heikoseeberger.akkasse.EventStreamMarshalling
 import scala.concurrent.ExecutionContext
+import spray.json.DefaultJsonProtocol
 
 object HttpService {
 
   import Directives._
   import EventStreamMarshalling._
+  import JsonMarshalling._
+  import JsonProtocol._
   import ServerSentEventProtocol._
 
   private[reactiveflows] case object Stop
 
   private[reactiveflows] case object CreateMessageEventSource
 
+  private[reactiveflows] case object CreateFlowEventSource
+
+  private object AddFlowRequest extends DefaultJsonProtocol {
+    implicit val format = jsonFormat1(apply)
+  }
+  private case class AddFlowRequest(label: String)
+
   /** Name for the [[HttpService]] actor. */
   final val Name = "http-service"
 
   /** Factory for [[HttpService]] `Props`. */
-  def props(interface: String, port: Int, askSelfTimeout: Timeout) =
-    Props(new HttpService(interface, port, askSelfTimeout))
+  def props(interface: String, port: Int, askSelfTimeout: Timeout, flowRegistryTimeout: Timeout) =
+    Props(new HttpService(interface, port, askSelfTimeout, flowRegistryTimeout))
 
-  private[reactiveflows] def route(self: ActorRef, askSelfTimeout: Timeout)(implicit ec: ExecutionContext) = {
+  private[reactiveflows] def route(self: ActorRef, askSelfTimeout: Timeout, flowRegistry: FlowRegistry, flowRegistryTimeout: Timeout)(implicit ec: ExecutionContext, fm: FlowMaterializer) = {
 
     // format: OFF
     def assets = getFromResourceDirectory("web") ~ path("")(getFromResource("web/index.html"))
@@ -64,14 +77,53 @@ object HttpService {
         }
       }
     }
+
+    def flows = pathPrefix("flows") {
+      path(Segment) { flowName =>
+        delete {
+          complete {
+            implicit val timeout = flowRegistryTimeout
+            flowRegistry.unregister(flowName).map {
+              case _: FlowRegistry.FlowUnregistered => StatusCodes.NoContent
+              case _: FlowRegistry.UnknownFlow => StatusCodes.NotFound
+            }
+          }
+        }
+      } ~
+      get {
+        complete {
+          implicit val timeout = flowRegistryTimeout
+          flowRegistry.getAll
+        }
+      } ~
+      post {
+        entity(as[AddFlowRequest]) { addFlowRequest =>
+          complete {
+            implicit val timeout = flowRegistryTimeout
+            flowRegistry.register(addFlowRequest.label).map {
+              case _: FlowRegistry.FlowRegistered  => StatusCodes.Created
+              case _: FlowRegistry.FlowExists => StatusCodes.Conflict
+            }
+          }
+        }
+      }
+    }
+
+    def flowEvents = path("flow-events") {
+      get {
+        complete {
+          self.ask(CreateFlowEventSource)(askSelfTimeout).mapTo[Source[FlowRegistry.FlowEvent]]
+        }
+      }
+    }
     // format: ON
 
-    assets ~ shutdown ~ messageEvents
+    assets ~ shutdown ~ messageEvents ~ flows ~ flowEvents
   }
 }
 
 /** HTTP service for Reactive Flows. */
-class HttpService(interface: String, port: Int, askSelfTimeout: Timeout)
+class HttpService(interface: String, port: Int, askSelfTimeout: Timeout, flowRegistryTimeout: Timeout)
     extends Actor
     with SettingsActor
     with ActorLogging
@@ -82,12 +134,13 @@ class HttpService(interface: String, port: Int, askSelfTimeout: Timeout)
 
   Http()(context.system)
     .bind(interface, port)
-    .startHandlingWith(route(context.self, askSelfTimeout))
+    .startHandlingWith(route(context.self, askSelfTimeout, FlowRegistry(context.system), flowRegistryTimeout))
   log.info(s"Listening on $interface:$port")
   log.info(s"To shutdown, send GET request to http://$interface:$port/shutdown")
 
   override def receive = {
     case CreateMessageEventSource => sender() ! createMessageEventSource()
+    case CreateFlowEventSource    => sender() ! createFlowEventSource()
     case Stop                     => context.stop(self) // This triggers shutdown by the reaper
   }
 
@@ -95,4 +148,10 @@ class HttpService(interface: String, port: Int, askSelfTimeout: Timeout)
   protected def createMessageEventSource() = Source(ActorPublisher(context.actorOf(
     MessageEventPublisher.props(settings.messageEventPublisher.bufferSize)
   )))
+
+  /** Factory for a source of [[FlowRegistry.FlowEvent]]. */
+  protected def createFlowEventSource() = Source(ActorPublisher(context.actorOf(FlowEventPublisher.props(
+    DistributedPubSubExtension(context.system).mediator,
+    settings.flowEventPublisher.bufferSize
+  ))))
 }
