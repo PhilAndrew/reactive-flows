@@ -30,6 +30,9 @@ class Settings(system: ExtendedActorSystem) extends Extension {
     /** Timeout for the [[HttpService]] asking itself. */
     val askSelfTimeout = getDuration("http-service.ask-self-timeout")
 
+    /** Timeout for the [[HttpService]] interacting with the [[FlowRegistry]]. */
+    val flowRegistryTimeout = getDuration("http-service.flow-registry-timeout")
+
     /** Interface for the [[HttpService]] to bind to. */
     val interface = reactiveFlows.getString("http-service.interface")
 
@@ -42,6 +45,23 @@ class Settings(system: ExtendedActorSystem) extends Extension {
 
     /** Buffer size for the [[MessageEventPublisher]]. */
     val bufferSize = reactiveFlows.getInt("message-event-publisher.buffer-size")
+  }
+
+  /** flow-event-publisher namespace. */
+  object flowEventPublisher {
+
+    /** Buffer size for the [[FlowEventPublisher]]. */
+    val bufferSize = reactiveFlows.getInt("flow-event-publisher.buffer-size")
+  }
+
+  /** flow-registry namespace. */
+  object flowRegistry {
+
+    /** Timeout for read consistency. */
+    val readTimeout = getDuration("flow-registry.read-timeout")
+
+    /** Timeout for write consistency. */
+    val writeTimeout = getDuration("flow-registry.write-timeout")
   }
 
   private val reactiveFlows = system.settings.config.getConfig("reactive-flows")

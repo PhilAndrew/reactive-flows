@@ -41,4 +41,23 @@ class ServerSentEventProtocolSpec extends WordSpec with Matchers {
       serverSentEvent.eventType shouldBe Some("added")
     }
   }
+
+  "A FlowEvent" should {
+
+    "be converted to a ServerSentEvent, if it is a FlowRegistered" in {
+      val serverSentEvent = FlowRegistry.FlowRegistered(FlowRegistry.Flow("akka", "Akka")): ServerSentEvent
+      val expectedData = """|{
+                            |  "name": "akka",
+                            |  "label": "Akka"
+                            |}""".stripMargin
+      serverSentEvent.data shouldBe expectedData
+      serverSentEvent.eventType shouldBe Some("added")
+    }
+
+    "be converted to a ServerSentEvent, if it is a FlowUnregistered" in {
+      val serverSentEvent = FlowRegistry.FlowUnregistered("akka"): ServerSentEvent
+      serverSentEvent.data shouldBe "akka"
+      serverSentEvent.eventType shouldBe Some("removed")
+    }
+  }
 }
