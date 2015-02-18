@@ -43,4 +43,7 @@ trait JsonProtocol extends DefaultJsonProtocol {
 
   /** JSON format for [[Flow.MessageAdded]]. */
   implicit val messageAddedFormat = jsonFormat2(Flow.MessageAdded)
+
+  /** JSON format for [[FlowRegistry.Flow]]. */
+  implicit val flowFormat = jsonFormat2(FlowRegistry.Flow.apply)
 }
