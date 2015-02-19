@@ -33,6 +33,9 @@ class Settings(system: ExtendedActorSystem) extends Extension {
     /** Timeout for the [[HttpService]] interacting with the [[FlowRegistry]]. */
     val flowRegistryTimeout = getDuration("http-service.flow-registry-timeout")
 
+    /** Timeout for the [[HttpService]] interacting with the [[FlowSharding]]. */
+    val flowShardingTimeout = getDuration("http-service.flow-sharding-timeout")
+
     /** Interface for the [[HttpService]] to bind to. */
     val interface = reactiveFlows.getString("http-service.interface")
 
@@ -62,6 +65,13 @@ class Settings(system: ExtendedActorSystem) extends Extension {
 
     /** Timeout for write consistency. */
     val writeTimeout = getDuration("flow-registry.write-timeout")
+  }
+
+  /** flow-sharding namespace. */
+  object flowSharding {
+
+    /** Number of shards for [[FlowSharding]]. */
+    val shardCount = reactiveFlows.getInt("flow-sharding.shard-count")
   }
 
   private val reactiveFlows = system.settings.config.getConfig("reactive-flows")

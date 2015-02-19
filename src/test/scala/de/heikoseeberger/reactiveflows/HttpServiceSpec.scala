@@ -45,7 +45,7 @@ class HttpServiceSpec extends WordSpec
     "send itself a Stop message upon receiving a GET request for '/shutdown' and respond with OK" in {
       val httpService = TestProbe()
       val request = HttpRequest(HttpMethods.GET, "/shutdown")
-      request ~> route(httpService.ref, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout) ~> check {
+      request ~> route(httpService.ref, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
         response.status shouldBe StatusCodes.OK
       }
       httpService.expectMsg(Stop)
@@ -53,7 +53,7 @@ class HttpServiceSpec extends WordSpec
 
     "respond with OK and index.html upon receiving a GET request for '/'" in {
       val request = HttpRequest(HttpMethods.GET)
-      request ~> route(system.deadLetters, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout) ~> check {
+      request ~> route(system.deadLetters, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
         response.status shouldBe StatusCodes.OK
         responseAs[String].trim shouldBe "test"
       }
@@ -61,7 +61,7 @@ class HttpServiceSpec extends WordSpec
 
     "respond with OK and index.html upon receiving a GET request for '/index.html'" in {
       val request = HttpRequest(HttpMethods.GET, "/index.html")
-      request ~> route(system.deadLetters, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout) ~> check {
+      request ~> route(system.deadLetters, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
         response.status shouldBe StatusCodes.OK
         responseAs[String].trim shouldBe "test"
       }
@@ -81,7 +81,7 @@ class HttpServiceSpec extends WordSpec
         }
       })
       val request = HttpRequest(HttpMethods.GET, "/message-events")
-      request ~> route(httpService.ref, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout) ~> check {
+      request ~> route(httpService.ref, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
         response.status shouldBe StatusCodes.OK
         val expected = """|event:added
                           |data:{
@@ -114,7 +114,7 @@ class HttpServiceSpec extends WordSpec
       Future.successful(Set(FlowRegistry.Flow("akka", "Akka"), FlowRegistry.Flow("angularjs", "AngularJS")))
     )
     val request = HttpRequest(HttpMethods.GET, "/flows")
-    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout) ~> check {
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
       response.status shouldBe StatusCodes.OK
       responseAs[String] shouldBe """|[{
                                      |  "name": "akka",
@@ -136,7 +136,7 @@ class HttpServiceSpec extends WordSpec
       "/flows",
       entity = HttpEntity(`application/json`, """{ "label": "Akka" }""")
     )
-    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout) ~> check {
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
       response.status shouldBe StatusCodes.Created
     }
   }
@@ -151,7 +151,7 @@ class HttpServiceSpec extends WordSpec
       "/flows",
       entity = HttpEntity(`application/json`, """{ "label": "Akka" }""")
     )
-    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout) ~> check {
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
       response.status shouldBe StatusCodes.Conflict
     }
   }
@@ -162,7 +162,7 @@ class HttpServiceSpec extends WordSpec
       Future.successful(FlowRegistry.FlowUnregistered("akka"))
     )
     val request = HttpRequest(HttpMethods.DELETE, "/flows/akka")
-    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout) ~> check {
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
       response.status shouldBe StatusCodes.NoContent
     }
   }
@@ -173,7 +173,7 @@ class HttpServiceSpec extends WordSpec
       Future.successful(FlowRegistry.UnknownFlow("akka"))
     )
     val request = HttpRequest(HttpMethods.DELETE, "/flows/akka")
-    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout) ~> check {
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
       response.status shouldBe StatusCodes.NotFound
     }
   }
@@ -192,7 +192,7 @@ class HttpServiceSpec extends WordSpec
       }
     })
     val request = HttpRequest(HttpMethods.GET, "/flow-events")
-    request ~> route(httpService.ref, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout) ~> check {
+    request ~> route(httpService.ref, askSelfTimeout, mock[FlowRegistry], flowRegistryTimeout, mock[FlowSharding], flowShardingTimeout) ~> check {
       response.status shouldBe StatusCodes.OK
       val expected = """|event:added
                         |data:{
@@ -207,5 +207,75 @@ class HttpServiceSpec extends WordSpec
       responseAs[String] shouldBe expected
     }
     httpService.expectMsg(CreateFlowEventSource)
+  }
+
+  "call FlowRegistry.get, FlowSharding.getMessages, and respond with OK and all messages of the akka flow upon receiving a GET request for '/flows/akka/messages'" in {
+    val flowRegistry = mock[FlowRegistry]
+    (flowRegistry.get(_: String)(_: Timeout, _: ExecutionContext)).expects("akka", *, *).returns(
+      Future.successful(Some(FlowRegistry.Flow("akka", "Akka")))
+    )
+    val time = LocalDateTime.from(DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse("2015-01-01T00:00:00"))
+    val flowSharding = mock[FlowSharding]
+    (flowSharding.getMessages(_: String)(_: Timeout)).expects("akka", *).returns(
+      Future.successful(List(Flow.Message("Akka rocks!", time)))
+    )
+    val request = HttpRequest(HttpMethods.GET, "/flows/akka/messages")
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, flowSharding, flowShardingTimeout) ~> check {
+      response.status shouldBe StatusCodes.OK
+      responseAs[String] shouldBe """|[{
+                                     |  "text": "Akka rocks!",
+                                     |  "dateTime": "2015-01-01T00:00:00"
+                                     |}]""".stripMargin
+    }
+  }
+
+  "call FlowRegistry.get and respond with NotFound upon receiving a GET request for '/flows/unknown/messages'" in {
+    val flowRegistry = mock[FlowRegistry]
+    (flowRegistry.get(_: String)(_: Timeout, _: ExecutionContext)).expects("unknown", *, *).returns(
+      Future.successful(None)
+    )
+    val flowSharding = mock[FlowSharding]
+    (flowSharding.getMessages(_: String)(_: Timeout)).expects(*, *).never()
+    val request = HttpRequest(HttpMethods.GET, "/flows/unknown/messages")
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, flowSharding, flowShardingTimeout) ~> check {
+      response.status shouldBe StatusCodes.NotFound
+    }
+  }
+
+  "call FlowRegistry.get, FlowSharding.addMessage, and respond with Created upon receiving a POST request for '/flows/akka/messages'" in {
+    val flowRegistry = mock[FlowRegistry]
+    (flowRegistry.get(_: String)(_: Timeout, _: ExecutionContext)).expects("akka", *, *).returns(
+      Future.successful(Some(FlowRegistry.Flow("akka", "Akka")))
+    )
+    val time = LocalDateTime.from(DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse("2015-01-01T00:00:00"))
+    val flowSharding = mock[FlowSharding]
+    (flowSharding.addMessage(_: String, _: String)(_: Timeout)).expects("akka", "Akka rocks!", *).returns(
+      Future.successful(Flow.MessageAdded("akka", (Flow.Message("Akka rocks!", time))))
+    )
+    val request = HttpRequest(
+      HttpMethods.POST,
+      "/flows/akka/messages",
+      entity = HttpEntity(`application/json`, """{ "text": "Akka rocks!" }""")
+    )
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, flowSharding, flowShardingTimeout) ~> check {
+      response.status shouldBe StatusCodes.Created
+    }
+  }
+
+  "call FlowRegistry.get and respond with NotFound upon receiving a POST request for '/flows/unknown/messages'" in {
+    val flowRegistry = mock[FlowRegistry]
+    (flowRegistry.get(_: String)(_: Timeout, _: ExecutionContext)).expects("unknown", *, *).returns(
+      Future.successful(None)
+    )
+    val flowSharding = mock[FlowSharding]
+    (flowSharding.getMessages(_: String)(_: Timeout)).expects(*, *).never()
+    val request = HttpRequest(
+      HttpMethods.POST,
+      "/flows/unknown/messages",
+      entity = HttpEntity(`application/json`, """{ "text": "Unknown sucks!" }""")
+    )
+    request ~> route(system.deadLetters, askSelfTimeout, flowRegistry, flowRegistryTimeout, flowSharding, flowShardingTimeout) ~> check {
+      response.status shouldBe StatusCodes.NotFound
+    }
   }
 }

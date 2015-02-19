@@ -16,25 +16,23 @@
 
 package de.heikoseeberger.reactiveflows
 
-import akka.actor.Props
+import akka.actor.{ ActorLogging, ActorRef, Props }
+import akka.contrib.pattern.DistributedPubSubMediator
 import de.heikoseeberger.akkasse.stream.EventPublisher
-import java.time.LocalDateTime
-import scala.concurrent.duration.DurationInt
 
 object MessageEventPublisher {
 
   /** Factory for [[MessageEventPublisher]] `Props`. */
-  def props(bufferSize: Int) = Props(new MessageEventPublisher(bufferSize))
+  def props(mediator: ActorRef, bufferSize: Int) = Props(new MessageEventPublisher(mediator, bufferSize))
 }
 
 /** A publisher of [[Flow.MessageEvent]]s. */
-class MessageEventPublisher(bufferSize: Int) extends EventPublisher[Flow.MessageEvent](bufferSize) {
+class MessageEventPublisher(mediator: ActorRef, bufferSize: Int)
+    extends EventPublisher[Flow.MessageEvent](bufferSize)
+    with ActorLogging {
 
-  import context.dispatcher
-
-  context.system.scheduler.schedule(2 seconds, 2 seconds) {
-    self ! Flow.MessageAdded("akka", Flow.Message("Akka and AngularJS are a great combination!", LocalDateTime.now()))
-  }
+  mediator ! DistributedPubSubMediator.Subscribe(Flow.MessageEventKey, self)
+  log.debug("Subscribed to message events")
 
   override protected def receiveEvent = {
     case event: Flow.MessageEvent => onEvent(event)

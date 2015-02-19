@@ -59,6 +59,9 @@ trait FlowRegistry {
   /** Get all flows. */
   def getAll(implicit timeout: Timeout, ec: ExecutionContext): Future[Set[Flow]]
 
+  /** Get the flow with the given name. */
+  def get(name: String)(implicit timeout: Timeout, ec: ExecutionContext): Future[Option[Flow]]
+
   /** Register the given flow. */
   def register(label: String)(implicit timeout: Timeout, ec: ExecutionContext): Future[RegisterFlowResult]
 
@@ -95,6 +98,19 @@ class FlowRegistryImpl(system: ExtendedActorSystem) extends FlowRegistry with Ex
           Future.successful(Set.empty[Flow])
         case other =>
           Future.failed(new Exception(s"Error getting all flows: $other"))
+      }
+
+  override def get(name: String)(implicit timeout: Timeout, ec: ExecutionContext) =
+    replicator
+      .ask(get)
+      .mapTo[Replicator.GetResponse]
+      .flatMap {
+        case Replicator.GetSuccess(ReplicatorKey, ORSet(flows), _) =>
+          Future.successful(flows.asInstanceOf[Set[Flow]].find(_.name == name))
+        case Replicator.NotFound(ReplicatorKey, _) =>
+          Future.successful(None)
+        case other =>
+          Future.failed(new Exception(s"Error finding flow with name '$name': $other"))
       }
 
   override def register(label: String)(implicit timeout: Timeout, ec: ExecutionContext) = {

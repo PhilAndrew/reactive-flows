@@ -1,6 +1,6 @@
 var reactiveFlowsControllers = angular.module('reactiveFlowsControllers', ['reactiveFlowsServices']);
 
-reactiveFlowsControllers.controller('HomeCtrl', ['$scope', 'Flow', function($scope, Flow) {
+reactiveFlowsControllers.controller('HomeCtrl', ['$scope', 'Flow', 'Message', function($scope, Flow, Message) {
 
     $scope.flows = [];
 
@@ -8,11 +8,11 @@ reactiveFlowsControllers.controller('HomeCtrl', ['$scope', 'Flow', function($sco
 
     $scope.currentFlowLabel = null;
 
-    $scope.messages = [
-        {text: 'Akka rocks!', dateTime: '2015-01-02T03:04:05.678'}
-    ];
+    $scope.messages = [];
 
-    $scope.shouldShowForm = true;
+    $scope.shouldShowForm = false;
+
+    $scope.message = new Message({'text': ''});
 
     $scope.flowBtnClass = function(name) {
         return ($scope.currentFlowName == name) ? 'btn-primary' : 'btn-info';
@@ -26,12 +26,16 @@ reactiveFlowsControllers.controller('HomeCtrl', ['$scope', 'Flow', function($sco
                 return flow.name == name;
             }).label;
             $scope.shouldShowForm = true;
-            $scope.messages = [];
+            var messages = Message.query({'flowName': name}, function() {
+                console.log('Received ' + messages.length + ' messages for flow ' + name);
+                $scope.messages = messages;
+            });
         }
     };
 
     $scope.sendMessage = function() {
-        alert('TODO: Missing implementation!');
+        $scope.message.$save({'flowName': $scope.currentFlowName});
+        $scope.message = new Message({'text': ''});
     };
 
     // Initialize flows

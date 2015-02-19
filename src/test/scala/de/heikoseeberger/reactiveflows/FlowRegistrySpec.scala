@@ -32,8 +32,10 @@ class FlowRegistrySpec extends BaseAkkaSpec {
   "A FlowRegistry" should {
     "correctly handle getting, registering and unregistering flows" in {
       Await.result(flowRegistry.getAll, awaitTimeout) shouldBe Set.empty
+      Await.result(flowRegistry.get("akka"), awaitTimeout) shouldBe None
       Await.result(flowRegistry.register("Akka"), awaitTimeout) shouldBe FlowRegistered(Flow("akka", "Akka"))
       Await.result(flowRegistry.getAll, awaitTimeout) shouldBe Set(Flow("akka", "Akka"))
+      Await.result(flowRegistry.get("akka"), awaitTimeout) shouldBe Some(Flow("akka", "Akka"))
       Await.result(flowRegistry.register("Akka"), awaitTimeout) shouldBe FlowExists("Akka")
       Await.result(flowRegistry.unregister("angularjs"), awaitTimeout) shouldBe UnknownFlow("angularjs")
       Await.result(flowRegistry.unregister("akka"), awaitTimeout) shouldBe FlowUnregistered("akka")
