@@ -27,7 +27,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{ ImplicitFlowMaterializer, Source }
 import akka.util.Timeout
 import de.heikoseeberger.akkasse.EventStreamMarshalling
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ Future, ExecutionContext }
 import spray.json.DefaultJsonProtocol
 
 object HttpService {
@@ -49,14 +49,26 @@ object HttpService {
   }
   private case class AddFlowRequest(label: String)
 
+  private object AddMessageRequest extends DefaultJsonProtocol {
+    implicit val format = jsonFormat1(apply)
+  }
+  private case class AddMessageRequest(text: String)
+
   /** Name for the [[HttpService]] actor. */
   final val Name = "http-service"
 
   /** Factory for [[HttpService]] `Props`. */
-  def props(interface: String, port: Int, askSelfTimeout: Timeout, flowRegistryTimeout: Timeout) =
-    Props(new HttpService(interface, port, askSelfTimeout, flowRegistryTimeout))
+  def props(interface: String, port: Int, askSelfTimeout: Timeout, flowRegistryTimeout: Timeout, flowShardingTimeout: Timeout) =
+    Props(new HttpService(interface, port, askSelfTimeout, flowRegistryTimeout, flowShardingTimeout))
 
-  private[reactiveflows] def route(self: ActorRef, askSelfTimeout: Timeout, flowRegistry: FlowRegistry, flowRegistryTimeout: Timeout)(implicit ec: ExecutionContext, fm: FlowMaterializer) = {
+  private[reactiveflows] def route(
+    self:                ActorRef,
+    askSelfTimeout:      Timeout,
+    flowRegistry:        FlowRegistry,
+    flowRegistryTimeout: Timeout,
+    flowSharding:        FlowSharding,
+    flowShardingTimeout: Timeout
+  )(implicit ec: ExecutionContext, fm: FlowMaterializer) = {
 
     // format: OFF
     def assets = getFromResourceDirectory("web") ~ path("")(getFromResource("web/index.html"))
@@ -79,6 +91,36 @@ object HttpService {
     }
 
     def flows = pathPrefix("flows") {
+      path(Segment / "messages") { flowName =>
+        get {
+          complete {
+            implicit val timeout = flowRegistryTimeout
+            flowRegistry
+              .get(flowName)
+              .flatMap { flow =>
+              if (flow.isEmpty) Future.successful(StatusCodes.NotFound -> Nil)
+              else flowSharding
+                .getMessages(flowName)(flowShardingTimeout)
+                .map(messages => StatusCodes.OK -> messages)
+            }
+          }
+        } ~
+        post {
+          entity(as[AddMessageRequest]) { addMessageRequest =>
+            complete {
+              implicit val timeout = flowRegistryTimeout
+              flowRegistry
+                .get(flowName)
+                .flatMap { flow =>
+                if (flow.isEmpty) Future.successful(StatusCodes.NotFound)
+                else flowSharding
+                  .addMessage(flowName, addMessageRequest.text)(flowShardingTimeout)
+                  .map(_ => StatusCodes.Created)
+              }
+            }
+          }
+        }
+      } ~
       path(Segment) { flowName =>
         delete {
           complete {
@@ -123,7 +165,7 @@ object HttpService {
 }
 
 /** HTTP service for Reactive Flows. */
-class HttpService(interface: String, port: Int, askSelfTimeout: Timeout, flowRegistryTimeout: Timeout)
+class HttpService(interface: String, port: Int, askSelfTimeout: Timeout, flowRegistryTimeout: Timeout, flowShardingTimeout: Timeout)
     extends Actor
     with SettingsActor
     with ActorLogging
@@ -134,7 +176,14 @@ class HttpService(interface: String, port: Int, askSelfTimeout: Timeout, flowReg
 
   Http()(context.system)
     .bind(interface, port)
-    .startHandlingWith(route(context.self, askSelfTimeout, FlowRegistry(context.system), flowRegistryTimeout))
+    .startHandlingWith(route(
+      context.self,
+      askSelfTimeout,
+      FlowRegistry(context.system),
+      flowRegistryTimeout,
+      FlowSharding(context.system),
+      flowShardingTimeout
+    ))
   log.info(s"Listening on $interface:$port")
   log.info(s"To shutdown, send GET request to http://$interface:$port/shutdown")
 
@@ -145,9 +194,10 @@ class HttpService(interface: String, port: Int, askSelfTimeout: Timeout, flowReg
   }
 
   /** Factory for a source of [[Flow.MessageEvent]]. */
-  protected def createMessageEventSource() = Source(ActorPublisher(context.actorOf(
-    MessageEventPublisher.props(settings.messageEventPublisher.bufferSize)
-  )))
+  protected def createMessageEventSource() = Source(ActorPublisher(context.actorOf(MessageEventPublisher.props(
+    DistributedPubSubExtension(context.system).mediator,
+    settings.messageEventPublisher.bufferSize
+  ))))
 
   /** Factory for a source of [[FlowRegistry.FlowEvent]]. */
   protected def createFlowEventSource() = Source(ActorPublisher(context.actorOf(FlowEventPublisher.props(
