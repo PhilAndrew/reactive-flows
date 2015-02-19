@@ -16,9 +16,12 @@
 
 package de.heikoseeberger.reactiveflows
 
+import akka.contrib.pattern.DistributedPubSubMediator
 import akka.stream.ActorFlowMaterializer
 import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{ Sink, Source }
+import akka.testkit.TestProbe
+import java.time.LocalDateTime
 import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
 
@@ -28,12 +31,18 @@ class MessageEventPublisherSpec extends BaseAkkaSpec {
 
   "A MessageEventPublisherSpec" should {
 
-    "periodically publish MessageAdded events (dummy implementation)" in {
-      val messageAdded = Source(ActorPublisher[Flow.MessageEvent](system.actorOf(MessageEventPublisher.props(10))))
-        .runWith(Sink.head)
-      val Flow.MessageAdded(flowName, Flow.Message(text, _)) = Await.result(messageAdded, 3 seconds)
+    "subscribe to message events and publish those" in {
+      val mediator = TestProbe()
+      val messageEventPublisher = system.actorOf(MessageEventPublisher.props(mediator.ref, 10))
+      mediator.expectMsg(DistributedPubSubMediator.Subscribe(Flow.MessageEventKey, messageEventPublisher))
+
+      val messageEvent = Source(ActorPublisher[Flow.MessageEvent](messageEventPublisher)).runWith(Sink.head)
+      val now = LocalDateTime.now()
+      messageEventPublisher ! Flow.MessageAdded("akka", Flow.Message("Akka rocks!", now))
+      val Flow.MessageAdded(flowName, Flow.Message(text, dateTime)) = Await.result(messageEvent, 1 second)
       flowName shouldBe "akka"
-      text shouldBe "Akka and AngularJS are a great combination!"
+      text shouldBe "Akka rocks!"
+      dateTime shouldBe now
     }
   }
 }
