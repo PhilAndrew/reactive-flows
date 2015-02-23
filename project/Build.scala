@@ -4,6 +4,7 @@ import de.heikoseeberger.sbtheader.SbtHeader.autoImport._
 import sbt._
 import sbt.Keys._
 import scalariform.formatter.preferences._
+import spray.revolver.RevolverPlugin._
 
 object Build extends AutoPlugin {
 
@@ -14,6 +15,7 @@ object Build extends AutoPlugin {
   override def projectSettings =
     scalariformSettings ++
     versionWithGit ++
+    Revolver.settings ++
     inConfig(Compile)(compileInputs.in(compile) <<= compileInputs.in(compile).dependsOn(createHeaders.in(compile))) ++
     inConfig(Test)(compileInputs.in(compile) <<= compileInputs.in(compile).dependsOn(createHeaders.in(compile))) ++
     List(
@@ -38,7 +40,7 @@ object Build extends AutoPlugin {
         .setPreference(AlignSingleLineCaseStatements.MaxArrowIndent, 100)
         .setPreference(DoubleIndentClassDeclaration, true),
       // Git settings
-      git.baseVersion := "0.1.0",
+      git.baseVersion := "3.0.0",
       // Header settings
       headers := Map(
         "scala" -> (
